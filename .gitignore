@@ -1,7 +1,9 @@
 __pycache__/
 *.py[cod]
 *.dll
-*.NEV
-*.NEF
-*.nev
-*.nef
+*.[Nn][Ee][Vv]
+*.[Nn][Ee][Ff]
+*.[Dd][Nn][Gg]
+outputs/
+work/
+.env
