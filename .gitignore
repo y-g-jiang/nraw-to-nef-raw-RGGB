@@ -7,3 +7,8 @@ __pycache__/
 outputs/
 work/
 .env
+data/
+NEF/
+dist/
+build/
+*.zip
