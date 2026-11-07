@@ -9,7 +9,7 @@ import struct
 import time
 import uuid
 
-VERSION = '1.2.0'
+VERSION = '1.2.1'
 SDK_SHA256 = 'a3c3039647716ebfb254898568dbb0954925e35dcb76a48b24cc58af36ca4b31'
 
 

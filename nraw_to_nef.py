@@ -227,7 +227,7 @@ def preview_slots(data, template):
             if 513 in p.tags:
                 start = p.tags[513].value[0]
                 length = p.tags[514].value[0]
-                slots.append((start, length, p.tags[514].offset+8))
+                slots.append((start, length, p.tags[514].offset+8, p.tags[513].offset+8, 0))
             if p.pages:
                 for sub in p.pages:
                     page(sub)
@@ -244,26 +244,43 @@ def preview_slots(data, template):
         if 513 in pi:
             off, = struct.unpack_from('<I', data, pi[513]+8)
             length, = struct.unpack_from('<I', data, pi[514]+8)
-            slots.append((base+off, length, pi[514]+8))
+            slots.append((base+off, length, pi[514]+8, pi[513]+8, base))
     return slots
 
-def replace_previews(data, slots, image):
+def replace_previews(data, slots, image, overflow_start):
     receipt = []
-    for start, reserved, count_at in slots:
-        old = Image.open(BytesIO(data[start:start+reserved]))
-        new = image.resize(old.size, Image.Resampling.LANCZOS)
-        for quality in (90, 80, 65, 45, 25):
-            out = BytesIO()
-            new.save(out, format='JPEG', quality=quality, optimize=True)
-            jpeg = out.getvalue()
-            if len(jpeg) <= reserved:
-                break
-        if len(jpeg) > reserved:
-            raise ValueError('Preview does not fit template slot')
-        data[start:start+reserved] = jpeg+b'\0'*(reserved-len(jpeg))
+    overflow = bytearray()
+    dimensions = []
+    for start, reserved, count_at, offset_at, base in slots:
+        if start < 0 or reserved <= 0 or start+reserved > len(data):
+            raise ValueError('Invalid template preview bounds')
+        if any(at < 0 or at+4 > len(data) for at in (count_at, offset_at)):
+            raise ValueError('Invalid template preview tag bounds')
+        with Image.open(BytesIO(data[start:start+reserved])) as old:
+            dimensions.append(old.size)
+    for (start, reserved, count_at, offset_at, base), size in zip(slots, dimensions):
+        new = image.resize(size, Image.Resampling.LANCZOS)
+        out = BytesIO()
+        new.save(out, format='JPEG', quality=90, optimize=True)
+        jpeg = out.getvalue()
+        relocated = len(jpeg) > reserved
+        if relocated:
+            if overflow_start < len(data):
+                raise ValueError('Preview overflow overlaps TIFF data')
+            overflow.extend(b'\0'*((-(overflow_start+len(overflow)))%2))
+            target = overflow_start+len(overflow)
+            if not 0 <= target-base <= 0xffffffff or target+len(jpeg) > 0x100000000:
+                raise ValueError('Preview exceeds classic TIFF offset limits')
+            struct.pack_into('<I', data, offset_at, target-base)
+            overflow.extend(jpeg)
+            data[start:start+reserved] = b'\0'*reserved
+        else:
+            target = start
+            data[start:start+reserved] = jpeg+b'\0'*(reserved-len(jpeg))
         struct.pack_into('<I', data, count_at, len(jpeg))
-        receipt.append(dict(width=old.width, height=old.height, bytes=len(jpeg)))
-    return receipt
+        receipt.append(dict(width=size[0], height=size[1], bytes=len(jpeg),
+                            relocated=relocated, quality=90))
+    return receipt, overflow
 
 def write_nef(raw, meta, source_info, template, output, source_name, frame, lens_reference=None, elapsed=None):
     with tifffile.TiffFile(template) as t:
@@ -280,14 +297,17 @@ def write_nef(raw, meta, source_info, template, output, source_name, frame, lens
         template_lens = template_exif.get('LensModel')
         if template_lens and source_info.get('LensModel') and template_lens.strip()!=source_info['LensModel'].strip():
             raise ValueError('Template lens differs from source; lens correction metadata cannot be borrowed')
-        exif_offset = struct.unpack_from('<I', template.read_bytes(), t.pages[0].tags[34665].offset+8)[0]
+        with template.open('rb') as stream:
+            stream.seek(t.pages[0].tags[34665].offset+8)
+            exif_offset, = struct.unpack('<I', stream.read(4))
         info_at, info_size = pg.tags[51157].valueoffset, pg.tags[51157].count
         xmp_tag = t.pages[0].tags.get(700)
         xmp_at = xmp_tag.valueoffset if xmp_tag else None
         xmp_size = xmp_tag.count if xmp_tag else 0
     if any(s > d for s, d in zip(raw.shape, shape)):
         raise ValueError('Decoded frame does not fit the same-camera still container')
-    data = bytearray(template.read_bytes()[:raw_offset])
+    with template.open('rb') as stream:
+        data = bytearray(stream.read(raw_offset))
     slots = preview_slots(data, template)
     exif = ifd_entries(data, exif_offset)
     mn_start, _ = tag_payload(data, exif[37500])
@@ -369,7 +389,6 @@ def write_nef(raw, meta, source_info, template, output, source_name, frame, lens
     if xmp_at is None or len(xmp) > xmp_size:
         raise ValueError('Template lacks sufficient XMP reservation')
     data[xmp_at:xmp_at+xmp_size] = xmp+b' '*(xmp_size-len(xmp))
-    output.write_bytes(data+encoded)
 
     step = max(2, ((max(shape)//1280+1)//2)*2)
     red = canvas[0::step,0::step].astype(np.float32)
@@ -382,7 +401,7 @@ def write_nef(raw, meta, source_info, template, output, source_name, frame, lens
     proxy=np.maximum(proxy-blacks,0)/(16383-blacks)*gains
     proxy=np.where(proxy<=0.0031308,12.92*proxy,1.055*np.power(np.maximum(proxy,0),1/2.4)-0.055)
     preview=Image.fromarray(np.rint(np.clip(proxy,0,1)*255).astype(np.uint8))
-    previews = replace_previews(data, slots, preview)
+    previews, preview_tail = replace_previews(data, slots, preview, len(data)+len(encoded))
 
     with tifffile.TiffFile(template) as t:
         for p in t.pages[0].pages:
@@ -392,7 +411,10 @@ def write_nef(raw, meta, source_info, template, output, source_name, frame, lens
                     thumb = preview.convert('L').resize((p.shape[1],p.shape[0]), Image.Resampling.LANCZOS).tobytes()
                     if len(thumb) == size:
                         data[start:start+size] = thumb
-    output.write_bytes(data+encoded)
+    with output.open('wb') as stream:
+        stream.write(data)
+        stream.write(encoded)
+        stream.write(preview_tail)
     inheritance=inherit_exif(output,meta,source_info,source_name,frame,elapsed)
     inheritance['picture_control_block_copied']=picture_control_copied
     inheritance['worldtime_block_copied']=worldtime_copied
