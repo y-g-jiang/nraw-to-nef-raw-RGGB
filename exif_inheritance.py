@@ -55,7 +55,7 @@ def metadata_plan(meta, info, source_name, frame, elapsed=None):
             tags[tag]=value;origins[tag]=origin
     def clip(dest,name):put(dest,info.get(name),info.get('_origins',{}).get(name,'clip:'+name))
     clip('IFD0:Make','Make');clip('IFD0:Model','Model')
-    put('IFD0:Software','NRAW to NEF 1.3','conversion software')
+    put('IFD0:Software','NRAW to NEF 1.4','conversion software')
     for dest,name in [
         ('ExifIFD:ExposureProgram','ExposureProgram'),('ExifIFD:ExposureMode','ExposureMode'),
         ('ExifIFD:MeteringMode','MeteringMode'),('ExifIFD:LensModel','LensModel'),
@@ -121,7 +121,7 @@ def metadata_plan(meta, info, source_name, frame, elapsed=None):
         if name.startswith('GPS') and info.get(name) is not None:clip('GPS:'+name,name)
     clip('IFD0:ImageDescription','ImageDescription')
     put('XMP-dc:Source',f'{source_name}#{frame}','source clip/frame identity')
-    put('XMP-xmp:CreatorTool','NRAW to NEF 1.3','conversion software')
+    put('XMP-xmp:CreatorTool','NRAW to NEF 1.4','conversion software')
     clears=set(tags)
 
     clears.update([

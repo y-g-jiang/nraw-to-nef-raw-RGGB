@@ -9,7 +9,7 @@ import struct
 import time
 import uuid
 
-VERSION = '1.3.0'
+VERSION = '1.4.0'
 SDK_SHA256 = 'a3c3039647716ebfb254898568dbb0954925e35dcb76a48b24cc58af36ca4b31'
 
 
@@ -146,16 +146,18 @@ def worker(job_path):
             os.environ[key] = '1'
         import nraw_to_nef as engine
         from raw_win import Decoder
+        from runtime_paths import bundled_decoder, bundled_exiftool
+        sdk = job.get('sdk') or str(bundled_decoder())
         source = Path(job['source']).resolve()
         template = Path(job['template']).resolve() if job.get('template') else None
         output = Path(job['output']).resolve()
-        engine.EXIFTOOL = job['exiftool']
+        engine.EXIFTOOL = job.get('exiftool') or str(bundled_exiftool())
         engine.PERL = job.get('perl', 'perl')
         if source.suffix.lower() != '.nev':
             raise ValueError('请选择 NEV 视频')
         if template and (source == template or template.suffix.lower() != '.nef'):
             raise ValueError('请选择有效的 NEF 模板，或留空使用无模板模式')
-        if digest(job['sdk']) != SDK_SHA256:
+        if digest(sdk) != SDK_SHA256:
             raise ValueError('解码器版本不匹配')
         source_stat = source.stat()
         source_identity = dict(source=canonical(source), size=source_stat.st_size, mtime_ns=source_stat.st_mtime_ns)
@@ -230,7 +232,7 @@ def worker(job_path):
                             raise OSError('输出磁盘空间不足')
                         emit('decoding', total=len(frames), frame=frame + 1)
                         if decoder is None:
-                            decoder = Decoder(job['sdk'], max(1, min(int(job.get('threads', 1)), 8)))
+                            decoder = Decoder(sdk, max(1, min(int(job.get('threads', 1)), 8)))
                         raw, depth = decoder.decode(sample)
                         if depth != 14:
                             raise ValueError(f'不支持的解码位深：{depth}')

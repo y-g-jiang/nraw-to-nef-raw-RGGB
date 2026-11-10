@@ -19,12 +19,13 @@ import tifffile
 from PIL import Image
 from nikon_lossless import encode
 from raw_win import Decoder, SDK_SHA256
+from runtime_paths import bundled_decoder, bundled_exiftool
 from lens_crop import bounded_crop
 from exif_inheritance import (CLIP_TAGS,source_info,frame_elapsed,metadata_plan,
                               write_arguments,verify_readback)
 
 PERL = os.environ.get('PERL', 'perl')
-EXIFTOOL = os.environ.get('EXIFTOOL', 'exiftool')
+EXIFTOOL = os.environ.get('EXIFTOOL', str(bundled_exiftool()) if bundled_exiftool().is_file() else 'exiftool')
 ADOBE = os.environ.get('ADOBE_DNG_CONVERTER', 'C:/Program Files/Adobe/Adobe DNG Converter/Adobe DNG Converter.exe')
 
 def exiftool_command():
@@ -508,7 +509,7 @@ def main():
     parser.add_argument('--frames', default='0')
     parser.add_argument('--out-dir', type=Path, default=ROOT/'outputs')
     parser.add_argument('--template', type=Path)
-    parser.add_argument('--sdk', type=Path, required=True)
+    parser.add_argument('--sdk', type=Path, default=bundled_decoder())
     parser.add_argument('--exiftool', default=EXIFTOOL)
     parser.add_argument('--perl', default=PERL)
     parser.add_argument('--adobe-converter', default=ADOBE)

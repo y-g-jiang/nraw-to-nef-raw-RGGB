@@ -147,7 +147,7 @@ def write_container(raw, meta, info, output):
         tag(254, 4, 1), tag(259, 3, 6), tag(271, 2, info.get('Make', 'NIKON CORPORATION')),
         tag(272, 2, info['Model']), tag(274, 3, meta.get('orientation', 1)),
         tag(282, 5, (300, 1)), tag(283, 5, (300, 1)), tag(296, 3, 2),
-        tag(305, 2, 'NRAW to NEF 1.3'), tag(330, 4, (0, 0)), tag(513, 4, 0),
+        tag(305, 2, 'NRAW to NEF 1.4'), tag(330, 4, (0, 0)), tag(513, 4, 0),
         tag(514, 4, len(jpeg)), tag(531, 3, 2), tag(34665, 4, 0), tag(37398, 1, b'\1\0\0\0')])
     exif = tiff.ifd([tag(36864, 7, b'0231'), tag(37500, 7, mn), tag(40960, 7, b'0100'),
                      tag(40961, 3, 1), tag(40962, 4, width), tag(40963, 4, height),

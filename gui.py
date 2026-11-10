@@ -21,12 +21,12 @@ def main():
     from dataclasses import dataclass, field
     import json
     import queue
-    import shutil
     import subprocess
     import threading
     import time
     import uuid
     from batch import VERSION, SDK_SHA256, atomic_json, canonical, digest, frame_count, output_folders, selection
+    from runtime_paths import runtime_files
 
     @dataclass
     class Item:
@@ -69,10 +69,6 @@ def main():
             self.step = tk.StringVar(value='1')
             self.destination = tk.StringVar(value=config.get('destination', str(APP_DIR / 'NEF')))
             self.template = tk.StringVar(value=config.get('template', '') if config.get('optional_template') else '')
-            self.sdk = tk.StringVar(value=config.get('sdk', os.environ.get('NRAW_SDK', '')))
-            bundled = RESOURCE_DIR / 'tools' / 'exiftool' / 'exiftool.exe'
-            saved_exiftool = config.get('exiftool', '')
-            self.exiftool = tk.StringVar(value=saved_exiftool if saved_exiftool and Path(saved_exiftool).is_file() else str(bundled) if bundled.is_file() else shutil.which('exiftool') or '')
             self.threads = tk.StringVar(value=str(config.get('threads', 1)))
             self.summary = tk.StringVar(value='0 个视频')
             self.detail = tk.StringVar(value='')
@@ -137,7 +133,8 @@ def main():
             header.grid(row=0, column=0, sticky='ew', pady=(0, 22))
             ttk.Label(header, text='NRAW → NEF', style='Title.TLabel').pack(side='left')
             ttk.Label(header, text=VERSION, style='Muted.TLabel').pack(side='left', padx=14, pady=(8, 0))
-            self.button(header, '设置', self.settings).pack(side='right')
+            ttk.Spinbox(header, from_=1, to=8, width=4, textvariable=self.threads, state='readonly').pack(side='right')
+            ttk.Label(header, text='线程', style='Muted.TLabel').pack(side='right', padx=(12, 8))
             paths = ttk.Frame(area)
             paths.grid(row=1, column=0, sticky='ew', pady=(0, 18))
             paths.columnconfigure(1, weight=1)
@@ -210,7 +207,7 @@ def main():
         def save(self):
             self.data.mkdir(parents=True, exist_ok=True)
             atomic_json(self.config_path, dict(optional_template=True, destination=self.destination.get().strip(), template=self.template.get().strip(),
-                                              sdk=self.sdk.get().strip(), exiftool=self.exiftool.get().strip(), threads=int(self.threads.get()),
+                                              threads=int(self.threads.get()),
                                               first=self.first.get(), last=self.last.get(), step=self.step.get(),
                                               queue=[dict(source=str(item.source), template=item.template) for item in self.items.values()]))
 
@@ -365,43 +362,6 @@ def main():
             if destination.is_dir():
                 os.startfile(str(destination))
 
-        def settings(self):
-            if self.busy:
-                return
-            dialog = tk.Toplevel(self.root)
-            dialog.title('设置')
-            dialog.configure(bg='#f5f6f8')
-            dialog.resizable(False, False)
-            dialog.transient(self.root)
-            content = ttk.Frame(dialog, padding=24)
-            content.pack(fill='both', expand=True)
-            values = [tk.StringVar(value=self.sdk.get()), tk.StringVar(value=self.exiftool.get())]
-            for row, (label, variable, title, types) in enumerate((
-                ('解码器', values[0], '选择 REDR3D-x64.dll', [('RED SDK', 'REDR3D-x64.dll')]),
-                ('ExifTool', values[1], '选择 ExifTool', [('ExifTool', '*.exe')]))):
-                ttk.Label(content, text=label).grid(row=row, column=0, sticky='w', padx=(0, 14), pady=7)
-                ttk.Entry(content, textvariable=variable, width=55).grid(row=row, column=1, pady=7)
-                def browse(v=variable, t=title, f=types):
-                    chosen = filedialog.askopenfilename(parent=dialog, title=t, filetypes=f)
-                    if chosen:
-                        v.set(chosen)
-                ttk.Button(content, text='选择', command=browse).grid(row=row, column=2, padx=(10, 0))
-            ttk.Label(content, text='线程').grid(row=2, column=0, sticky='w', pady=10)
-            threads = tk.StringVar(value=self.threads.get())
-            ttk.Spinbox(content, from_=1, to=8, width=6, textvariable=threads, state='readonly').grid(row=2, column=1, sticky='w', pady=10)
-            def apply():
-                self.sdk.set(values[0].get().strip())
-                self.exiftool.set(values[1].get().strip())
-                self.threads.set(threads.get())
-                try:
-                    self.save()
-                except OSError as exc:
-                    messagebox.showerror('无法保存设置', str(exc), parent=dialog)
-                    return
-                dialog.destroy()
-            ttk.Button(content, text='保存', style='Primary.TButton', command=apply).grid(row=3, column=1, columnspan=2, sticky='e', pady=(16, 0))
-            dialog.grab_set()
-
         def refresh_summary(self):
             if not self.busy:
                 count = len(self.items)
@@ -429,9 +389,7 @@ def main():
                         raise ValueError(f'{item.source.name}：模板不存在，可清空使用无模板模式')
                 if not self.destination.get().strip():
                     raise ValueError('请选择输出目录')
-                if not Path(self.sdk.get()).is_file() or not Path(self.exiftool.get()).is_file():
-                    self.settings()
-                    return
+                sdk, exiftool = runtime_files()
                 threads = int(self.threads.get())
                 if not 1 <= threads <= 8:
                     raise ValueError('线程范围：1–8')
@@ -448,7 +406,7 @@ def main():
                     if item.total:
                         value = self.item_template(item)
                         jobs.append((item.key, dict(source=str(item.source), template=str(Path(value).resolve()) if value else None,
-                                                   output=str(folder), sdk=str(Path(self.sdk.get()).resolve()), exiftool=str(Path(self.exiftool.get()).resolve()),
+                                                   output=str(folder), sdk=str(sdk.resolve()), exiftool=str(exiftool.resolve()),
                                                    first=first, last=last, step=step, threads=threads)))
                 if not jobs:
                     raise ValueError('所选范围内没有视频帧')
@@ -460,7 +418,7 @@ def main():
                 self.summary.set('准备中')
                 threading.Thread(target=self.run_queue, args=(jobs,), daemon=True).start()
             except (OSError, ValueError) as exc:
-                messagebox.showerror('无法开始', str(exc), parent=self.root)
+                self.detail.set(str(exc).replace('\n', ' ')[:180])
 
         def run_queue(self, jobs):
             try:

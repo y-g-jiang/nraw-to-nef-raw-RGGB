@@ -1,0 +1,44 @@
+NRAW to NEF - Windows portable application
+Copyright (c) 2026 Jiang Yaogeng.
+
+Using this binary distribution constitutes acceptance of these terms. If you do
+not accept them, do not use this distribution.
+
+You receive a limited, non-exclusive license to use this application. You may
+make archival or backup copies permitted by applicable law. No other right to
+copy, distribute, sell, sublicense, rent, lend, or lease this binary distribution
+is granted. Obtain distribution permission from the application developer.
+
+Do not reverse engineer, decompile, disassemble, or attempt to recover source
+code or file formats from the proprietary components, except where applicable
+law grants a right that cannot be waived. Source code published separately by
+the application developer and third-party open-source components are governed
+by their respective terms; this agreement does not remove rights those licenses
+give you.
+
+The application developer and its suppliers retain ownership and all rights
+not expressly granted. The bundled decoder is the original, unmodified
+REDR3D-x64.dll runtime. RED and its licensors retain ownership of that component.
+Copyright (c) RED Digital Cinema. All rights reserved. The runtime is installed
+in this application's private tools/nraw directory for this application only.
+The SDK headers, samples, static libraries, and documentation are not included.
+
+If you need other RED software, obtain a valid license directly from its owner
+and comply with the license supplied with that software. This application is
+independent; RED does not certify it or guarantee its performance. The
+application developer is responsible for support and updates. No support or
+update obligation is imposed on RED or the application's other suppliers.
+
+The application and proprietary components are provided as available, without
+warranties or conditions of any kind, including title, non-infringement,
+merchantability, fitness for a particular purpose, accuracy, or uninterrupted
+operation. To the maximum extent allowed by law, neither the developer nor its
+suppliers is liable for lost data, lost profits, business interruption, or
+indirect, incidental, special, or consequential damages. Their aggregate
+liability is limited to the amount you paid for this application. Mandatory
+consumer rights and liabilities that cannot lawfully be excluded are preserved.
+
+Third-party open-source notices are in the licenses directory and the ExifTool
+distribution. Those components remain available under their original licenses.
+RED SDK license information:
+https://www.reddigitalcinema.com/legal/red-r3d-sdk-license-agreement
