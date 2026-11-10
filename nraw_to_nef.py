@@ -283,6 +283,9 @@ def replace_previews(data, slots, image, overflow_start):
     return receipt, overflow
 
 def write_nef(raw, meta, source_info, template, output, source_name, frame, lens_reference=None, elapsed=None):
+    if template is None:
+        from standalone_nef import write_nef as standalone_write
+        return standalone_write(raw, meta, source_info, output, source_name, frame, elapsed)
     with tifffile.TiffFile(template) as t:
         if t.byteorder != '<' or t.pages[0].tags[272].value != source_info['Model']:
             raise ValueError('A little-endian NEF template from the same camera model is required')
@@ -504,7 +507,7 @@ def main():
     parser.add_argument('source', type=Path)
     parser.add_argument('--frames', default='0')
     parser.add_argument('--out-dir', type=Path, default=ROOT/'outputs')
-    parser.add_argument('--template', type=Path, required=True)
+    parser.add_argument('--template', type=Path)
     parser.add_argument('--sdk', type=Path, required=True)
     parser.add_argument('--exiftool', default=EXIFTOOL)
     parser.add_argument('--perl', default=PERL)
@@ -521,9 +524,15 @@ def main():
     samples, timescale, timing = index_nev(source)
     frames = frame_list(args.frames, len(samples))
 
-    with tifffile.TiffFile(args.template) as t:
-        pg = next(p for p in t.pages[0].pages if p.tags.get(262) and p.tags[262].value == 32803)
-        worst = int(np.prod(pg.shape))*22//8+pg.tags[273].value[0]+1024*1024
+    info = clip_metadata(source)
+    if args.template:
+        with tifffile.TiffFile(args.template) as t:
+            pg = next(p for p in t.pages[0].pages if p.tags.get(262) and p.tags[262].value == 32803)
+            worst = int(np.prod(pg.shape))*22//8+pg.tags[273].value[0]+1024*1024
+    else:
+        from standalone_nef import geometry
+        shape, _ = geometry(info['Model'])
+        worst = shape[0]*shape[1]*22//8+16*1024*1024
     if worst*len(frames) > args.max_output_mib*1024**2:
         raise ValueError('Selected frames exceed --max-output-mib worst-case bound')
     if args.adobe_check:
@@ -531,9 +540,11 @@ def main():
         verified=[]
         for frame in frames:
             command=[sys.executable,Path(__file__).resolve(),source,'--frames',str(frame),
-                     '--out-dir',output,'--template',args.template,'--sdk',args.sdk,
+                     '--out-dir',output,'--sdk',args.sdk,
                      '--exiftool',EXIFTOOL,'--perl',PERL,'--adobe-converter',ADOBE,
                      '--threads',str(args.threads),'--max-output-mib',str(args.max_output_mib)]
+            if args.template:
+                command += ['--template',args.template]
             if args.lens_reference:
                 command += ['--lens-reference',args.lens_reference]
             worker=run(command)
@@ -554,14 +565,14 @@ def main():
         verification.write_text(json.dumps({'results':verified},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
         return
     dec = Decoder(args.sdk, args.threads)
-    info = clip_metadata(source)
     report = dict(format='Nikon lossless NEF, no DNGVersion tag', source=str(source),
                   source_bytes=source.stat().st_size, source_model=info['Model'],
                   frames_in_clip=len(samples), timescale=timescale, timing=timing,
-                  template=str(args.template.resolve()), template_sha256=sha(args.template.read_bytes()),
+                  template=str(args.template.resolve()) if args.template else None,
+                  template_sha256=sha(args.template.read_bytes()) if args.template else None,
                   sdk_sha256=SDK_SHA256,
-                  limits=['Same-camera template and fitting RGGB NRAW modes only',
-                          'Same-camera private still metadata is retained where source video semantics are unverified',
+                  limits=['RGGB 14-bit NRAW; optional same-camera photographic template',
+                          'Photographic private metadata is retained only when an external template is supplied',
                           'Adobe uses its photo camera profile and photo white level; this does not reproduce Nikon/RED NRAW rendering',
                           'Adobe engine CLI tested; Lightroom/Camera Raw application UI is not installed here'],
                   results=[])

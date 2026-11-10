@@ -9,7 +9,7 @@ import struct
 import time
 import uuid
 
-VERSION = '1.2.1'
+VERSION = '1.3.0'
 SDK_SHA256 = 'a3c3039647716ebfb254898568dbb0954925e35dcb76a48b24cc58af36ca4b31'
 
 
@@ -147,29 +147,36 @@ def worker(job_path):
         import nraw_to_nef as engine
         from raw_win import Decoder
         source = Path(job['source']).resolve()
-        template = Path(job['template']).resolve()
+        template = Path(job['template']).resolve() if job.get('template') else None
         output = Path(job['output']).resolve()
         engine.EXIFTOOL = job['exiftool']
         engine.PERL = job.get('perl', 'perl')
-        if source == template or source.suffix.lower() != '.nev' or template.suffix.lower() != '.nef':
-            raise ValueError('请选择 NEV 视频和 NEF 模板')
+        if source.suffix.lower() != '.nev':
+            raise ValueError('请选择 NEV 视频')
+        if template and (source == template or template.suffix.lower() != '.nef'):
+            raise ValueError('请选择有效的 NEF 模板，或留空使用无模板模式')
         if digest(job['sdk']) != SDK_SHA256:
             raise ValueError('解码器版本不匹配')
         source_stat = source.stat()
         source_identity = dict(source=canonical(source), size=source_stat.st_size, mtime_ns=source_stat.st_mtime_ns)
-        template_stat = template.stat()
-        template_sha = digest(template)
+        template_stat = template.stat() if template else None
+        template_sha = digest(template) if template else None
         samples, timescale, timing = engine.index_nev(source)
         frames = selection(len(samples), job['first'], job['last'], job['step'])
         if not frames:
             emit('complete', total=0)
             return 0
         info = engine.clip_metadata(source)
-        with engine.tifffile.TiffFile(template) as tiff:
-            if tiff.byteorder != '<' or tiff.pages[0].tags[272].value != info['Model']:
-                raise ValueError('NEF 模板与视频机型不一致')
-            page = next(p for p in tiff.pages[0].pages if p.tags.get(262) and p.tags[262].value == 32803)
-            worst = int(page.shape[0]) * int(page.shape[1]) * 22 // 8 + page.tags[273].value[0] + 1024 * 1024
+        if template:
+            with engine.tifffile.TiffFile(template) as tiff:
+                if tiff.byteorder != '<' or tiff.pages[0].tags[272].value != info['Model']:
+                    raise ValueError('NEF 模板与视频机型不一致')
+                page = next(p for p in tiff.pages[0].pages if p.tags.get(262) and p.tags[262].value == 32803)
+                worst = int(page.shape[0]) * int(page.shape[1]) * 22 // 8 + page.tags[273].value[0] + 1024 * 1024
+        else:
+            from standalone_nef import geometry
+            shape, _ = geometry(info['Model'])
+            worst = shape[0] * shape[1] * 22 // 8 + 16 * 1024 * 1024
         output.mkdir(parents=True, exist_ok=True)
         metadata = output / '.nraw-to-nef'
         metadata.mkdir(exist_ok=True)
@@ -195,10 +202,10 @@ def worker(job_path):
                         emit('cancelled', total=len(frames))
                         return 0
                     current_source = source.stat()
-                    current_template = template.stat()
+                    current_template = template.stat() if template else None
                     if (current_source.st_size, current_source.st_mtime_ns) != (source_stat.st_size, source_stat.st_mtime_ns):
                         raise ValueError('转换时源视频发生变化')
-                    if (current_template.st_size, current_template.st_mtime_ns) != (template_stat.st_size, template_stat.st_mtime_ns):
+                    if template and (current_template.st_size, current_template.st_mtime_ns) != (template_stat.st_size, template_stat.st_mtime_ns):
                         raise ValueError('转换时 NEF 模板发生变化')
                     target = output / f'frame_{frame + 1:06d}.NEF'
                     receipt_path = receipts / f'{frame + 1:06d}.json'

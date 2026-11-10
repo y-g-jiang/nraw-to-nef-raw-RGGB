@@ -68,7 +68,7 @@ def main():
             self.last = tk.StringVar(value='')
             self.step = tk.StringVar(value='1')
             self.destination = tk.StringVar(value=config.get('destination', str(APP_DIR / 'NEF')))
-            self.template = tk.StringVar(value=config.get('template', ''))
+            self.template = tk.StringVar(value=config.get('template', '') if config.get('optional_template') else '')
             self.sdk = tk.StringVar(value=config.get('sdk', os.environ.get('NRAW_SDK', '')))
             bundled = RESOURCE_DIR / 'tools' / 'exiftool' / 'exiftool.exe'
             saved_exiftool = config.get('exiftool', '')
@@ -97,7 +97,7 @@ def main():
                 templates = {canonical(row['source']): row.get('template', '') for row in saved_queue[:10000]
                              if isinstance(row, dict) and isinstance(row.get('source'), str)}
                 for item in self.items.values():
-                    item.template = templates.get(canonical(item.source), '')
+                    item.template = templates.get(canonical(item.source), '') if config.get('optional_template') else ''
                     self.update_row(item)
             for variable, key, fallback in ((self.first, 'first', '1'), (self.last, 'last', ''), (self.step, 'step', '1')):
                 variable.set(str(config.get(key, fallback)))
@@ -141,7 +141,7 @@ def main():
             paths = ttk.Frame(area)
             paths.grid(row=1, column=0, sticky='ew', pady=(0, 18))
             paths.columnconfigure(1, weight=1)
-            for row, label, variable, command in ((0, '输出目录', self.destination, self.pick_destination), (1, '默认模板', self.template, self.pick_template)):
+            for row, label, variable, command in ((0, '输出目录', self.destination, self.pick_destination), (1, '模板（可选）', self.template, self.pick_template)):
                 ttk.Label(paths, text=label).grid(row=row, column=0, sticky='w', padx=(0, 16), pady=5)
                 entry = ttk.Entry(paths, textvariable=variable)
                 entry.grid(row=row, column=1, sticky='ew', pady=5)
@@ -154,6 +154,7 @@ def main():
             self.button(tools, '移除', self.remove).pack(side='left', padx=(0, 8))
             self.button(tools, '清空', self.clear).pack(side='left')
             self.button(tools, '指定模板', self.assign_template).pack(side='right')
+            self.button(tools, '无模板', self.no_template).pack(side='right', padx=8)
             table = ttk.Frame(area)
             table.grid(row=3, column=0, sticky='nsew')
             table.rowconfigure(0, weight=1)
@@ -175,6 +176,7 @@ def main():
             context = tk.Menu(self.root, tearoff=False)
             context.add_command(label='指定模板', command=self.assign_template)
             context.add_command(label='使用默认模板', command=self.reset_template)
+            context.add_command(label='无模板', command=self.no_template)
             context.add_separator()
             context.add_command(label='打开输出文件夹', command=self.open_selected)
             context.add_command(label='移除', command=self.remove)
@@ -207,7 +209,7 @@ def main():
 
         def save(self):
             self.data.mkdir(parents=True, exist_ok=True)
-            atomic_json(self.config_path, dict(destination=self.destination.get().strip(), template=self.template.get().strip(),
+            atomic_json(self.config_path, dict(optional_template=True, destination=self.destination.get().strip(), template=self.template.get().strip(),
                                               sdk=self.sdk.get().strip(), exiftool=self.exiftool.get().strip(), threads=int(self.threads.get()),
                                               first=self.first.get(), last=self.last.get(), step=self.step.get(),
                                               queue=[dict(source=str(item.source), template=item.template) for item in self.items.values()]))
@@ -299,6 +301,25 @@ def main():
                     self.items[key].template = value
                     self.update_row(self.items[key])
 
+        def item_template(self, item):
+            return '' if item.template is None else item.template or self.template.get().strip()
+
+        def no_template(self):
+            if self.busy:
+                return
+            selected = self.tree.selection()
+            if selected:
+                for key in selected:
+                    if key in self.items:
+                        self.items[key].template = None
+                        self.update_row(self.items[key])
+            else:
+                self.template.set('')
+                for item in self.items.values():
+                    item.template = None
+                    self.update_row(item)
+            self.save()
+
         def reset_template(self):
             if not self.busy:
                 for key in self.tree.selection():
@@ -310,8 +331,8 @@ def main():
                 self.update_row(item)
 
         def update_row(self, item):
-            template = item.template or self.template.get().strip()
-            name = Path(template).name if template else '—'
+            template = self.item_template(item)
+            name = Path(template).name if template else '无模板'
             if template and not item.template:
                 name = '默认 · ' + name
             self.tree.item(item.key, values=(item.source.name, item.count or '—', name,
@@ -403,9 +424,9 @@ def main():
                 step = int(self.step.get())
                 selection(1, first, last, step)
                 for item in self.items.values():
-                    template = Path(item.template or self.template.get().strip())
-                    if template.suffix.lower() != '.nef' or not template.is_file():
-                        raise ValueError(f'{item.source.name}：请选择 NEF 模板')
+                    value = self.item_template(item)
+                    if value and (Path(value).suffix.lower() != '.nef' or not Path(value).is_file()):
+                        raise ValueError(f'{item.source.name}：模板不存在，可清空使用无模板模式')
                 if not self.destination.get().strip():
                     raise ValueError('请选择输出目录')
                 if not Path(self.sdk.get()).is_file() or not Path(self.exiftool.get()).is_file():
@@ -425,7 +446,8 @@ def main():
                     item.status = '等待' if item.total else '无选中帧'
                     self.update_row(item)
                     if item.total:
-                        jobs.append((item.key, dict(source=str(item.source), template=str(Path(item.template or self.template.get()).resolve()),
+                        value = self.item_template(item)
+                        jobs.append((item.key, dict(source=str(item.source), template=str(Path(value).resolve()) if value else None,
                                                    output=str(folder), sdk=str(Path(self.sdk.get()).resolve()), exiftool=str(Path(self.exiftool.get()).resolve()),
                                                    first=first, last=last, step=step, threads=threads)))
                 if not jobs:
